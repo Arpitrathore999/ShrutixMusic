@@ -48,6 +48,18 @@ SUPPORT_CHAT = getenv(
     "https://t.me/ShrutiSupportChat"
 )
 
+# ✅ NEW — Bot display name (used in /start message)
+BOT_NAME = getenv(
+    "BOT_NAME",
+    "Shrutix Music",
+)
+
+# ✅ NEW — Updates channel (used in /start message + pills)
+UPDATES_CHANNEL = getenv(
+    "UPDATES_CHANNEL",
+    "https://t.me/ShrutiBots",
+)
+
 AUTO_LEAVING_ASSISTANT = getenv(
     "AUTO_LEAVING_ASSISTANT",
     "False"
@@ -128,4 +140,11 @@ if SUPPORT_CHAT:
     if not re.match("(?:http|https)://", SUPPORT_CHAT):
         raise SystemExit(
             "[ERROR] SUPPORT_CHAT url must start with https://"
+        )
+
+# ✅ NEW — validate UPDATES_CHANNEL like the others
+if UPDATES_CHANNEL:
+    if not re.match("(?:http|https)://", UPDATES_CHANNEL):
+        raise SystemExit(
+            "[ERROR] UPDATES_CHANNEL url must start with https://"
         )
