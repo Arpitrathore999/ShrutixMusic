@@ -10,7 +10,6 @@ from ShrutixMusic.utils.decorators.language import LanguageStart, languageCB
 from ShrutixMusic.utils.inline.help import help_back_markup, private_help_panel
 from config import BANNED_USERS, START_IMG_URL, SUPPORT_CHAT
 from strings import get_string, helpers
-from ShrutixMusic.utils.rich_ui import send_panel, HELP_RICH, HELP_PLAIN
 
 MESSAGE_EFFECTS = [
     5107584321108051014,
@@ -59,7 +58,7 @@ async def helper_private(
         _ = get_string(language)
         keyboard = help_pannel(_, True, 1)
         await update.edit_message_text(
-            HELP_PLAIN, reply_markup=keyboard
+            _["help_1"].format(SUPPORT_CHAT), reply_markup=keyboard
         )
     else:
         try:
@@ -69,7 +68,12 @@ async def helper_private(
         language = await get_lang(update.chat.id)
         _ = get_string(language)
         keyboard = help_pannel(_, None, 1)
-        await send_panel(client, update, HELP_RICH, HELP_PLAIN, keyboard, START_IMG_URL)
+        await update.reply_photo(
+            photo=START_IMG_URL,
+            caption=_["help_1"].format(SUPPORT_CHAT),
+            reply_markup=keyboard,
+            effect_id=random.choice(MESSAGE_EFFECTS),
+        )
 
 
 @nand.on_message(filters.command(["help"]) & filters.group & ~BANNED_USERS)
@@ -88,7 +92,7 @@ async def help_page_cb(client, CallbackQuery, _):
     START = sf == "1"
     keyboard = help_pannel(_, START, page)
     await CallbackQuery.edit_message_text(
-        HELP_PLAIN, reply_markup=keyboard
+        _["help_1"].format(SUPPORT_CHAT), reply_markup=keyboard
     )
 
 

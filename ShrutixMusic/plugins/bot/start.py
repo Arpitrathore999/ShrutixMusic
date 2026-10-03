@@ -23,7 +23,6 @@ from ShrutixMusic.utils.formatters import get_readable_time
 from ShrutixMusic.utils.inline import help_pannel, private_panel, start_panel
 from config import BANNED_USERS
 from strings import get_string
-from ShrutixMusic.utils.rich_ui import send_panel, START_RICH, START_PLAIN, HELP_RICH, HELP_PLAIN
 
 MESSAGE_EFFECTS = [
     5107584321108051014,
@@ -41,7 +40,12 @@ async def start_pm(client, message: Message, _):
     name = message.text.split(None, 1)[1] if len(message.text.split()) > 1 else ""
     if name[0:4] == "help":
         keyboard = help_pannel(_)
-        return await send_panel(client, message, HELP_RICH, HELP_PLAIN, keyboard, config.START_IMG_URL)
+        return await message.reply_photo(
+            photo=config.START_IMG_URL,
+            caption=_["help_1"].format(config.SUPPORT_CHAT),
+            reply_markup=keyboard,
+            effect_id=effect_id,
+        )
     if name[0:3] == "sud":
         await sudoers_list(client=client, message=message, _=_)
         if await is_on_off(2):
@@ -89,7 +93,12 @@ async def start_pm(client, message: Message, _):
             )
         return
     out = private_panel(_)
-    await send_panel(client, message, START_RICH, START_PLAIN, InlineKeyboardMarkup(out), config.START_IMG_URL)
+    await message.reply_photo(
+        photo=config.START_IMG_URL,
+        caption=_["start_2"].format(message.from_user.mention, nand.mention),
+        reply_markup=InlineKeyboardMarkup(out),
+        effect_id=effect_id,
+    )
     if await is_on_off(2):
         return await nand.send_message(
             chat_id=config.LOGGER_ID,
