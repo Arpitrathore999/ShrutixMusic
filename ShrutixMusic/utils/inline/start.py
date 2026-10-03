@@ -29,7 +29,7 @@ def start_panel(_):
                 style=s[0],
             ),
             InlineKeyboardButton(
-                text="🍬 sᴜᴘᴘᴏʀᴛ 🍬",
+                text=_["S_B_2"],
                 url=config.SUPPORT_CHAT,
                 style=s[1],
             ),
@@ -43,33 +43,33 @@ def private_panel(_):
     buttons = [
         [
             InlineKeyboardButton(
-                text="⛩️ ᴀᴅᴅ ᴍᴇ ⛩️",
+                text=_["S_B_3"],
                 url=f"https://t.me/{nand.username}?startgroup=true",
                 style=s[0],
             )
         ],
         [
             InlineKeyboardButton(
-                text="🏩 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs 🏩",
+                text=_["S_B_4"],
                 callback_data="settings_back_helper",
                 style=s[1],
             )
         ],
         [
             InlineKeyboardButton(
-                text="🍹 ᴜᴘᴅᴀᴛᴇs 🍹",
+                text=_["S_B_6"],
                 url=config.SUPPORT_CHANNEL,
                 style=s[2],
             ),
             InlineKeyboardButton(
-                text="🍬 sᴜᴘᴘᴏʀᴛ 🍬",
+                text=_["S_B_2"],
                 url=config.SUPPORT_CHAT,
                 style=s[3],
             ),
         ],
         [
             InlineKeyboardButton(
-                text="🫧 ᴏᴡɴᴇʀ 🫧",
+                text=_["S_B_5"],
                 user_id=config.OWNER_ID,
                 style=s[4],
             ),
