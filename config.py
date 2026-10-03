@@ -16,10 +16,10 @@ BOT_TOKEN = getenv("BOT_TOKEN", "")
 # Get from MongoDB Atlas
 MONGO_DB_URI = getenv("MONGO_DB_URI", "")
 
-DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", "60"))
+DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", "999"))
 
 LOGGER_ID = int(getenv("LOGGER_ID", "0"))
-OWNER_ID = int(getenv("OWNER_ID", "7574330905"))
+OWNER_ID = int(getenv("OWNER_ID", "0"))
 
 # Heroku App Name
 HEROKU_APP_NAME = getenv("HEROKU_APP_NAME", "")
@@ -29,7 +29,7 @@ HEROKU_API_KEY = getenv("HEROKU_API_KEY", "")
 
 UPSTREAM_REPO = getenv(
     "UPSTREAM_REPO",
-    "https://github.com/NoxxOP/ShrutixMusic",
+    "https://t.me/AstraVerse0",
 )
 
 UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "main")
@@ -40,12 +40,12 @@ GIT_TOKEN = getenv("GIT_TOKEN")
 
 SUPPORT_CHANNEL = getenv(
     "SUPPORT_CHANNEL",
-    "https://t.me/ShrutiBots"
+    "https://t.me/YuniteCrew"
 )
 
 SUPPORT_CHAT = getenv(
     "SUPPORT_CHAT",
-    "https://t.me/ShrutiSupportChat"
+    "https://t.me/+A3bmzLTMu5sxMWVh"
 )
 
 AUTO_LEAVING_ASSISTANT = getenv(
@@ -54,7 +54,7 @@ AUTO_LEAVING_ASSISTANT = getenv(
 ).lower() == "true"
 
 # Get from developer.spotify.com/dashboard
-SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_ID = getenv("0")
 SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET")
 
 PLAYLIST_FETCH_LIMIT = int(
@@ -85,12 +85,12 @@ confirmer = {}
 
 START_IMG_URL = getenv(
     "START_IMG_URL",
-    "https://graph.org/file/7557c0e0e0c1708f62d6a-6892ea881cc1555c83.jpg"
+    "https://i.postimg.cc/vH0SjwTd/file-0000000068e481f5bdb6b51d38b33e13.png"
 )
 
 PING_IMG_URL = getenv(
     "PING_IMG_URL",
-    "https://graph.org/file/f35df5dd605d76ff790b7-953db0f3e71a2e5a1a.jpg"
+    "https://i.postimg.cc/nzfd7HRX/file-0000000091a481f5b37074fd636d5f99.png"
 )
 
 PLAYLIST_IMG_URL = "https://te.legra.ph/file/4ec5ae4381dffb039b4ef.jpg"
