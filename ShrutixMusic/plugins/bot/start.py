@@ -1,18 +1,10 @@
-# --------------------------------------------------------------------------------
-#  ShrutixMusic — start.py (Outlaw-style /start)
-# --------------------------------------------------------------------------------
-
-import html as _html
+import asyncio
 import random
-import time
 
 from pyrogram import enums, filters
 from pyrogram.enums import ChatType
-from pyrogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
+from pyrogram.errors import FloodWait
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from py_yt import VideosSearch
 
 import config
@@ -29,67 +21,19 @@ from ShrutixMusic.utils.database import (
 )
 from ShrutixMusic.utils.decorators.language import LanguageStart
 from ShrutixMusic.utils.formatters import get_readable_time
-from ShrutixMusic.utils.inline import help_pannel, private_panel, start_panel
+from ShrutixMusic.utils.rich_ui import (
+    rich_esc,
+    rich_heading,
+    rich_img,
+    rich_kv_table,
+    rich_note,
+    rich_send,
+    rich_table,
+    rich_details,
+    sanitize_display_name,
+)
 from config import BANNED_USERS
 from strings import get_string
-
-# ── Rich UI (Outlaw-style) ────────────────────────────────────────────────────
-try:
-    from ShrutixMusic.utils.rich_ui import (
-        RICH_AVAILABLE,
-        rich_send,
-        rich_img,
-        rich_note,
-        rich_table,
-        rich_details,
-        rich_esc,
-        rich_caption,
-        sanitize_display_name,
-    )
-    HAS_RICH_UI = True
-except ImportError:
-    HAS_RICH_UI = False
-    RICH_AVAILABLE = False
-
-    def rich_esc(v):
-        return _html.escape(str(v or ""), quote=False)
-
-    def sanitize_display_name(v, max_len=64):
-        return str(v or "User")[:max_len]
-
-    def rich_caption(t):
-        return t
-
-    def rich_img(s):
-        return ""
-
-    def rich_note(t, expandable=False):
-        return f"<blockquote>{t}</blockquote>"
-
-    def rich_table(h, r, border=1):
-        return ""
-
-    def rich_details(s, b, open=False):
-        return b
-
-    async def rich_send(*a, **k):
-        return None
-
-
-# ── Button helper (silently drops `style=` if fork doesn't support it) ────────
-def _make_btn(text, **kwargs):
-    try:
-        return InlineKeyboardButton(text, **kwargs)
-    except TypeError:
-        kwargs.pop("style", None)
-        return InlineKeyboardButton(text, **kwargs)
-
-
-_BTN_PRIMARY = "primary"
-_BTN_SUCCESS = "success"
-_BTN_DANGER  = "danger"
-_BTN_DEFAULT = "default"
-
 
 MESSAGE_EFFECTS = [
     5107584321108051014,
@@ -99,129 +43,44 @@ MESSAGE_EFFECTS = [
 ]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  /start (private)
-# ══════════════════════════════════════════════════════════════════════════════
+def _bot_link() -> str:
+    username = getattr(nand, "username", None) or ""
+    return f"https://t.me/{username}" if username else "https://t.me/"
 
-@nand.on_message(filters.command(["start"]) & filters.private & ~BANNED_USERS)
-@LanguageStart
-async def start_pm(client, message: Message, _):
-    await add_served_user(message.from_user.id)
-    effect_id = random.choice(MESSAGE_EFFECTS)
-    parts = message.text.split(None, 1)
-    name = parts[1] if len(parts) > 1 else ""
 
-    # ── /start help ──────────────────────────────────────────────────────────
-    if name[0:4] == "help":
-        keyboard = help_pannel(_)
-        return await message.reply_photo(
-            photo=config.START_IMG_URL,
-            caption=_["help_1"].format(config.SUPPORT_CHAT),
-            reply_markup=keyboard,
-            effect_id=effect_id,
-        )
+def _start_photo() -> str:
+    return getattr(config, "START_IMG_URL", "")
 
-    # ── /start sud ───────────────────────────────────────────────────────────
-    if name[0:3] == "sud":
-        await sudoers_list(client=client, message=message, _=_)
-        if await is_on_off(2):
-            return await nand.send_message(
-                chat_id=config.LOGGER_ID,
-                text=(
-                    f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ ᴛᴏ ᴄʜᴇᴄᴋ "
-                    f"<b>sᴜᴅᴏʟɪsᴛ</b>.\n\n"
-                    f"<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>\n"
-                    f"<b>ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.from_user.username}"
-                ),
-            )
-        return
 
-    # ── /start info_<video_id> ───────────────────────────────────────────────
-    if name[0:3] == "inf":
-        m = await message.reply_text("🔎")
-        query = (str(name)).replace("info_", "", 1)
-        query = f"https://www.youtube.com/watch?v={query}"
-        results = VideosSearch(query, limit=1)
-        for result in (await results.next())["result"]:
-            title = result["title"]
-            duration = result["duration"]
-            views = result["viewCount"]["short"]
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-            channellink = result["channel"]["link"]
-            channel = result["channel"]["name"]
-            link = result["link"]
-            published = result["publishedTime"]
-        searched_text = _["start_6"].format(
-            title, duration, views, published, channellink, channel, nand.mention
-        )
-        key = InlineKeyboardMarkup(
-            [
-                [
-                    InlineKeyboardButton(text=_["S_B_8"], url=link),
-                    InlineKeyboardButton(text=_["S_B_9"], url=config.SUPPORT_CHAT),
-                ],
-            ]
-        )
-        await m.delete()
-        await nand.send_photo(
-            chat_id=message.chat.id,
-            photo=thumbnail,
-            caption=searched_text,
-            reply_markup=key,
-        )
-        if await is_on_off(2):
-            await nand.send_message(
-                chat_id=config.LOGGER_ID,
-                text=(
-                    f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ ᴛᴏ ᴄʜᴇᴄᴋ "
-                    f"<b>ᴛʀᴀᴄᴋ ɪɴғᴏʀᴍᴀᴛɪᴏɴ</b>.\n\n"
-                    f"<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>\n"
-                    f"<b>ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.from_user.username}"
-                ),
-            )
-        return
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  ✨ OUTLAW-STYLE DEFAULT /start ✨
-    # ══════════════════════════════════════════════════════════════════════════
-
-    uid       = message.from_user.id
-    user_name = sanitize_display_name(message.from_user.first_name)
-    bot_name  = getattr(config, "BOT_NAME", "Shrutix Music")
-    support   = getattr(config, "SUPPORT_CHAT", "https://t.me/ShrutiBots")
-    updates   = getattr(config, "UPDATES_CHANNEL", support)
-    owner_id  = getattr(config, "OWNER_ID", 0)
-    photo_url = getattr(config, "START_IMG_URL", None)
-
-    # ── Support/Updates pills (Outlaw style) ─────────────────────────────────
-    pills = (
+def _support_pills() -> str:
+    support = getattr(config, "SUPPORT_CHAT", "")
+    updates = getattr(config, "SUPPORT_CHANNEL", "")
+    return (
         "<p>"
-        f'<tg-button type="url" style="primary" url="{support}">'
-        "🍬 sᴜᴘᴘᴏʀᴛ</tg-button> "
-        f'<tg-button type="url" style="success" url="{updates}">'
-        "🍹 ᴜᴘᴅᴀᴛᴇs</tg-button>"
-        "</p>"
+        + (f'<tg-button type="url" style="primary" url="{rich_esc(support)}">🍬 sᴜᴘᴘᴏʀᴛ ↗</tg-button> ' if support else "")
+        + (f'<tg-button type="url" style="success" url="{rich_esc(updates)}">🍹 ᴜᴘᴅᴀᴛᴇs ↗</tg-button>' if updates else "")
+        + "</p>"
     )
 
-    # ── Full rich caption ────────────────────────────────────────────────────
-    caption = (
-        (rich_img(photo_url) if photo_url else "")
+
+def _start_rich(uid: int, name: str) -> str:
+    bot_name = rich_esc(getattr(nand, "name", "ShrutixMusic"))
+    photo = _start_photo()
+    return (
+        rich_img(photo)
         + rich_note(
-            f"<p>❍ ʜᴇʏ <a href='tg://user?id={uid}'>{rich_esc(user_name)}</a>, "
-            "ᴡᴇʟᴄᴏᴍᴇ ᴀʙᴏᴀʀᴅ! 🎶</p>"
-            f"<p>ɪ ᴀᴍ <b>{rich_esc(bot_name)}</b> — ᴀ ғᴀsᴛ &amp; "
-            "ᴘᴏᴡᴇʀғᴜʟ ᴛᴇʟᴇɢʀᴀᴍ ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ ʙᴏᴛ ᴡɪᴛʜ sᴏᴍᴇ "
-            "ᴀᴡᴇsᴏᴍᴇ ғᴇᴀᴛᴜʀᴇs.</p>"
+            f"<p>❍ ʜᴇʏ <a href=\"tg://user?id={uid}\">{rich_esc(name)}</a>, ᴡᴇʟᴄᴏᴍᴇ ᴀʙᴏᴀʀᴅ! 🎶</p>"
+            f"<p>ɪ ᴀᴍ <b>{bot_name}</b> — ᴀ ғᴀsᴛ &amp; ᴘᴏᴡᴇʀғᴜʟ ᴛᴇʟᴇɢʀᴀᴍ ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ ʙᴏᴛ ᴡɪᴛʜ sᴏᴍᴇ ᴀᴡᴇsᴏᴍᴇ ғᴇᴀᴛᴜʀᴇs.</p>"
         )
         + rich_details(
             "✦ ᴋᴇʏ ғᴇᴀᴛᴜʀᴇs ✦",
             rich_table(
                 ["ғᴇᴀᴛᴜʀᴇ", "ᴅᴇᴛᴀɪʟs"],
                 [
-                    ("🎵 sᴛʀᴇᴀᴍɪɴɢ",   "ᴘʟᴀʏ ᴀᴜᴅɪᴏ &amp; ᴠɪᴅᴇᴏ ɪɴ ᴠᴏɪᴄᴇ ᴄʜᴀᴛs"),
-                    ("🔁 ᴀᴜᴛᴏᴘʟᴀʏ",    "ᴋᴇᴇᴘs ᴛʜᴇ ǫᴜᴇᴜᴇ ɢᴏɪɴɢ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ"),
-                    ("🎚️ ᴇғғᴇᴄᴛs",     "sᴘᴇᴇᴅ ᴄᴏɴᴛʀᴏʟ &amp; ʙᴀss ʙᴏᴏsᴛ"),
-                    ("🛡️ ᴍᴏᴅᴇʀᴀᴛɪᴏɴ", "ʙʟᴏᴄᴋ/ᴜɴʙʟᴏᴄᴋ ᴄʜᴀᴛs &amp; ᴜsᴇʀs"),
+                    ("🎵 sᴛʀᴇᴀᴍɪɴɢ", "ᴘʟᴀʏ ᴀᴜᴅɪᴏ &amp; ᴠɪᴅᴇᴏ ɪɴ ᴠᴏɪᴄᴇ ᴄʜᴀᴛs"),
+                    ("🔁 ᴀᴜᴛᴏᴘʟᴀʏ", "ᴋᴇᴇᴘs ᴛʜᴇ ǫᴜᴇᴜᴇ ɢᴏɪɴɢ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ"),
+                    ("🎚️ ᴇғғᴇᴄᴛs", "sᴘᴇᴇᴅ ᴄᴏɴᴛʀᴏʟ &amp; ʙᴀss ʙᴏᴏsᴛ"),
+                    ("🛡️ ᴍᴏᴅᴇʀᴀᴛɪᴏɴ", "ᴄʜᴀᴛ ᴀɴᴅ ᴜsᴇʀ ᴄᴏɴᴛʀᴏʟs"),
                 ],
             ),
             open=True,
@@ -233,105 +92,94 @@ async def start_pm(client, message: Message, _):
             "<p>❍ ᴄʟɪᴄᴋ ʜᴇʟᴘ ʙᴇʟᴏᴡ ғᴏʀ ᴀʟʟ ᴄᴏᴍᴍᴀɴᴅs.</p>",
             open=True,
         )
-        + rich_note(
-            "ᴘᴏᴡᴇʀᴇᴅ ʙʏ » "
-            "<a href='https://t.me/YuniteCrew'>ᴏᴜᴛʟᴀᴡ 〄 ᴍᴜsɪᴄ</a>"
-        )
-        + pills
+        + rich_note(f"ᴘᴏᴡᴇʀᴇᴅ ʙʏ » <b>{bot_name}</b>")
+        + _support_pills()
     )
 
-    # ── Inline keyboard ──────────────────────────────────────────────────────
-    kb = InlineKeyboardMarkup([
-        [
-            _make_btn(
-                "⛩️ ᴧᴅᴅ мᴇ ʙᴧʙʏ ⛩️",
-                url=f"https://t.me/{nand.username}?startgroup=true",
-                style=_BTN_PRIMARY,
-            )
-        ],
-        [
-            _make_btn("🍬 sᴜᴘᴘᴏʀᴛ 🍬", url=support,  style=_BTN_SUCCESS),
-            _make_btn("🍹 ᴜᴘᴅᴀᴛᴇs 🍹", url=updates, style=_BTN_SUCCESS),
-        ],
-        [
-            _make_btn(
-                "🏩 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs 🏩",
-                callback_data="settings_back_helper",
-                style=_BTN_PRIMARY,
-            )
-        ],
-        [
-            _make_btn(
-                "🫧 ᴏᴡɴᴇʀ 🫧",
-                url=f"tg://user?id={owner_id}",
-                style=_BTN_DEFAULT,
-            ),
-            _make_btn(
-                "🍡 sᴏᴜʀᴄᴇ 🍡",
-                url="https://github.com/NoxxOP/ShrutiMusic",
-                style=_BTN_DEFAULT,
-            ),
-        ],
+
+def _start_keyboard() -> InlineKeyboardMarkup:
+    owner = getattr(config, "OWNER_ID", 0)
+    support = getattr(config, "SUPPORT_CHAT", "")
+    updates = getattr(config, "SUPPORT_CHANNEL", "")
+    buttons = [
+        [InlineKeyboardButton("⛩️ ᴧᴅᴅ мᴇ ʙᴧʙʏ ⛩️", url=f"{_bot_link()}?startgroup=true", style=enums.ButtonStyle.PRIMARY)],
+    ]
+    row = []
+    if support:
+        row.append(InlineKeyboardButton("🍬 sᴜᴘᴘᴏʀᴛ 🍬", url=support, style=enums.ButtonStyle.SUCCESS))
+    if updates:
+        row.append(InlineKeyboardButton("🍹 ᴜᴘᴅᴀᴛᴇs 🍹", url=updates, style=enums.ButtonStyle.SUCCESS))
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("🏩 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs 🏩", callback_data="show_help", style=enums.ButtonStyle.PRIMARY)])
+    buttons.append([
+        InlineKeyboardButton("🫧 ᴏᴡɴᴇʀ 🫧", user_id=owner, style=enums.ButtonStyle.DEFAULT),
+        InlineKeyboardButton("🍡 sᴏᴜʀᴄᴇ 🍡", url=getattr(config, "UPSTREAM_REPO", "https://github.com/NoxxOP/ShrutixMusic"), style=enums.ButtonStyle.DEFAULT),
     ])
+    return InlineKeyboardMarkup(buttons)
 
-    # ── Send: rich path first, photo+caption fallback ────────────────────────
-    sent_ok = False
-    if HAS_RICH_UI and RICH_AVAILABLE:
-        try:
-            await rich_send(
-                nand,
-                message.chat.id,
-                caption,
-                reply_markup=kb,
-                effect_id=effect_id,
+
+@nand.on_message(filters.command(["start"]) & filters.private & ~BANNED_USERS)
+@LanguageStart
+async def start_pm(client, message: Message, _):
+    await add_served_user(message.from_user.id)
+    name_arg = message.text.split(None, 1)[1] if len(message.text.split()) > 1 else ""
+    if name_arg.startswith("help"):
+        from ShrutixMusic.plugins.bot.help import send_help_menu
+        return await send_help_menu(message, delete_command=False)
+    if name_arg.startswith("sud"):
+        await sudoers_list(client=client, message=message, _=_)
+        if await is_on_off(2):
+            await nand.send_message(
+                chat_id=config.LOGGER_ID,
+                text=f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ ᴛᴏ ᴄʜᴇᴄᴋ <b>sᴜᴅᴏʟɪsᴛ</b>.\n\n<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>",
             )
-            sent_ok = True
-        except Exception as e:
-            print(f"[start_pm] rich_send failed: {e}")
+        return
+    if name_arg.startswith("inf"):
+        m = await message.reply_text("🔎")
+        query = name_arg.replace("info_", "", 1)
+        results = VideosSearch(f"https://www.youtube.com/watch?v={query}", limit=1)
+        result = (await results.next())["result"]
+        if not result:
+            return await m.edit_text("❌ No result found.")
+        item = result[0]
+        key = InlineKeyboardMarkup([[InlineKeyboardButton("ʏᴏᴜᴛᴜʙᴇ 🎄", url=item["link"]), InlineKeyboardButton("sᴜᴘᴘᴏʀᴛ", url=config.SUPPORT_CHAT)]])
+        await m.delete()
+        return await nand.send_photo(chat_id=message.chat.id, photo=item["thumbnails"][0]["url"].split("?")[0], caption=_['start_6'].format(item['title'], item['duration'], item['viewCount']['short'], item['publishedTime'], item['channel']['link'], item['channel']['name'], nand.mention), reply_markup=key)
 
-    if not sent_ok:
-        fallback = rich_caption(caption) if HAS_RICH_UI else caption
-        if len(fallback) > 1000:
-            fallback = fallback[:1000].rstrip() + "…"
-        await message.reply_photo(
-            photo=config.START_IMG_URL,
-            caption=fallback,
-            reply_markup=kb,
-            effect_id=effect_id,
-        )
+    name = sanitize_display_name(message.from_user.first_name)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    try:
+        await rich_send(nand, message.chat.id, _start_rich(message.from_user.id, name), reply_markup=_start_keyboard(), effect_id=random.choice(MESSAGE_EFFECTS))
+    except FloodWait as fw:
+        await asyncio.sleep(fw.value + 1)
+        await rich_send(nand, message.chat.id, _start_rich(message.from_user.id, name), reply_markup=_start_keyboard())
 
-    # ── Logger ───────────────────────────────────────────────────────────────
     if await is_on_off(2):
-        return await nand.send_message(
-            chat_id=config.LOGGER_ID,
-            text=(
-                f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ.\n\n"
-                f"<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>\n"
-                f"<b>ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.from_user.username}"
-            ),
-        )
+        await nand.send_message(chat_id=config.LOGGER_ID, text=f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ.\n\n<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  /start (group)
-# ══════════════════════════════════════════════════════════════════════════════
 
 @nand.on_message(filters.command(["start"]) & filters.group & ~BANNED_USERS)
 @LanguageStart
 async def start_gp(client, message: Message, _):
-    out = start_panel(_)
-    uptime = int(time.time() - _boot_)
-    await message.reply_photo(
-        photo=config.START_IMG_URL,
-        caption=_["start_1"].format(nand.mention, get_readable_time(uptime)),
-        reply_markup=InlineKeyboardMarkup(out),
+    name = sanitize_display_name(message.from_user.first_name)
+    chat_title = rich_esc(message.chat.title or "this chat")
+    caption = (
+        rich_img(_start_photo())
+        + rich_note(f"❍ ʜᴇʏ <a href=\"tg://user?id={message.from_user.id}\">{rich_esc(name)}</a>, ᴛʜɪs ɪs <b>{rich_esc(nand.name)}</b>.")
+        + rich_note(f"ᴛʜᴀɴᴋs ғᴏʀ ᴀᴅᴅɪɴɢ ᴍᴇ ɪɴ {chat_title}. ʏᴏᴜ ᴄᴀɴ ɴᴏᴡ ᴘʟᴀʏ sᴏɴɢs ʜᴇʀᴇ.")
+        + _support_pills()
     )
-    return await add_served_chat(message.chat.id)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⛩️ ᴧᴅᴅ мᴇ ʙᴧʙʏ ⛩️", url=f"{_bot_link()}?startgroup=true", style=enums.ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("🏩 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs 🏩", callback_data="show_help", style=enums.ButtonStyle.PRIMARY)],
+    ])
+    await rich_send(nand, message.chat.id, caption, reply_markup=kb)
+    await add_served_chat(message.chat.id)
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Bot added to a new chat
-# ══════════════════════════════════════════════════════════════════════════════
 
 @nand.on_message(filters.new_chat_members, group=-1)
 async def welcome(client, message: Message):
@@ -349,27 +197,11 @@ async def welcome(client, message: Message):
                     await message.reply_text(_["start_4"])
                     return await nand.leave_chat(message.chat.id)
                 if message.chat.id in await blacklisted_chats():
-                    await message.reply_text(
-                        _["start_5"].format(
-                            nand.mention,
-                            f"https://t.me/{nand.username}?start=sudolist",
-                            config.SUPPORT_CHAT,
-                        ),
-                        disable_web_page_preview=True,
-                    )
+                    await message.reply_text(_["start_5"].format(nand.mention, f"https://t.me/{nand.username}?start=sudolist", config.SUPPORT_CHAT), disable_web_page_preview=True)
                     return await nand.leave_chat(message.chat.id)
-
-                out = start_panel(_)
-                await message.reply_photo(
-                    photo=config.START_IMG_URL,
-                    caption=_["start_3"].format(
-                        message.from_user.first_name,
-                        nand.mention,
-                        message.chat.title,
-                        nand.mention,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(out),
-                )
+                caption = rich_img(_start_photo()) + rich_note(f"❍ ʜᴇʏ {rich_esc(message.from_user.first_name)}, ᴛʜᴀɴᴋ ʏᴏᴜ ғᴏʀ ᴀᴅᴅɪɴɢ <b>{rich_esc(nand.name)}</b> ᴛᴏ <b>{rich_esc(message.chat.title)}</b>.") + _support_pills()
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏩 ʜᴇʟᴘ & ᴄᴏᴍᴍᴀɴᴅs 🏩", callback_data="show_help", style=enums.ButtonStyle.PRIMARY)]])
+                await rich_send(nand, message.chat.id, caption, reply_markup=kb)
                 await add_served_chat(message.chat.id)
                 await message.stop_propagation()
         except Exception as ex:
