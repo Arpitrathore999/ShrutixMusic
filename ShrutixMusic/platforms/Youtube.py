@@ -1,18 +1,24 @@
 import asyncio
 import os
 import re
+import time
 from typing import Union
+
+import aiohttp
 import yt_dlp
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from py_yt import VideosSearch, Playlist
-import aiohttp
 
-API_URL = os.environ.get("SHRUTI_API_URL", "https://api.shrutibots.site")
-
-API_KEY = os.environ.get("SHRUTI_API_KEY", "YOUR_API_KEY") ## Get This API KEY FROM TELEGRAM BOT USERNAME: @SHRUTIAPIBOT 
+import config
 
 DOWNLOAD_DIR = "downloads"
+
+AUDIO_EXTENSIONS = ("webm", "m4a", "mp3", "ogg")
+VIDEO_EXTENSIONS = ("mp4", "mkv", "webm")
+
+API_COOLDOWN = 90            # seconds to skip a repeatedly failing API
+MAX_CONSECUTIVE_FAILS = 2
 
 
 def _env_dir(name: str) -> str:
@@ -22,8 +28,6 @@ def _env_dir(name: str) -> str:
 
 AUDIO_DOWNLOAD_PATH = _env_dir("AUDIO_DOWNLOAD_PATH")
 VIDEO_DOWNLOAD_PATH = _env_dir("VIDEO_DOWNLOAD_PATH")
-AUDIO_EXTENSIONS = ("webm", "m4a", "mp3", "ogg")
-VIDEO_EXTENSIONS = ("mp4", "mkv", "webm")
 
 
 def is_external_path(path) -> bool:
@@ -36,14 +40,17 @@ def is_external_path(path) -> bool:
     return False
 
 
-def _find_external(directory: str, video_id: str, extensions, resp=None):
+def _find_external(directory, video_id, extensions, resp=None):
     names = []
     if resp is not None:
-        disposition = resp.content_disposition
-        if disposition and disposition.filename:
-            name = os.path.basename(disposition.filename)
-            if name.startswith(video_id + "."):
-                names.append(name)
+        try:
+            disposition = resp.content_disposition
+            if disposition and disposition.filename:
+                name = os.path.basename(disposition.filename)
+                if name.startswith(video_id + "."):
+                    names.append(name)
+        except Exception:
+            pass
     names.extend(f"{video_id}.{ext}" for ext in extensions)
     for name in names:
         path = os.path.join(directory, name)
@@ -56,6 +63,184 @@ def time_to_seconds(time):
     stringt = str(time)
     return sum(int(x) * 60 ** i for i, x in enumerate(reversed(stringt.split(":"))))
 
+
+# =========================================================
+# Shruti API Pool with automatic failover
+# =========================================================
+
+class ShrutiAPI:
+    def __init__(self, url: str, key: str):
+        self.url = url.rstrip("/")
+        self.key = key
+        self.fail_count = 0
+        self.cooldown_until = 0.0
+        self.total_calls = 0
+        self.total_ok = 0
+
+    @property
+    def available(self) -> bool:
+        return time.time() >= self.cooldown_until
+
+    def mark_success(self):
+        self.fail_count = 0
+        self.cooldown_until = 0.0
+        self.total_calls += 1
+        self.total_ok += 1
+
+    def mark_failure(self):
+        self.fail_count += 1
+        self.total_calls += 1
+        if self.fail_count >= MAX_CONSECUTIVE_FAILS:
+            self.cooldown_until = time.time() + API_COOLDOWN
+
+    def __repr__(self):
+        state = "ok" if self.available else f"cool({int(self.cooldown_until - time.time())}s)"
+        return f"<{self.url} {state} ok={self.total_ok}/{self.total_calls}>"
+
+
+class ShrutiAPIPool:
+    def __init__(self):
+        self.apis = []
+        self._index = 0
+        self._load()
+
+    def _load(self):
+        urls_raw = (os.environ.get("SHRUTI_API_URLS") or "").strip()
+        keys_raw = (os.environ.get("SHRUTI_API_KEYS") or "").strip()
+
+        urls = [u.strip() for u in urls_raw.split(",") if u.strip()] if urls_raw else []
+        keys = [k.strip() for k in keys_raw.split(",") if k.strip()] if keys_raw else []
+
+        if urls:
+            for i, u in enumerate(urls):
+                k = keys[i] if i < len(keys) else (keys[-1] if keys else "")
+                if k:
+                    self.apis.append(ShrutiAPI(u, k))
+
+        # Fallback to legacy single API
+        if not self.apis:
+            u = (os.environ.get("SHRUTI_API_URL")
+                 or getattr(config, "SHRUTI_API_URL", "") or "").strip()
+            k = (os.environ.get("SHRUTI_API_KEY")
+                 or getattr(config, "SHRUTI_API_KEY", "") or "").strip()
+            if u and k:
+                self.apis.append(ShrutiAPI(u, k))
+
+        print(f"[ShrutiAPI] Loaded {len(self.apis)} API(s): {self.apis}")
+
+    @property
+    def has_apis(self) -> bool:
+        return bool(self.apis)
+
+    def _ordered(self):
+        n = len(self.apis)
+        if n == 0:
+            return []
+        rotated = [self.apis[(self._index + i) % n] for i in range(n)]
+        healthy = [a for a in rotated if a.available]
+        cooled = [a for a in rotated if not a.available]
+        return healthy + cooled
+
+    def _advance(self):
+        if self.apis:
+            self._index = (self._index + 1) % len(self.apis)
+
+    async def get_json(self, endpoint: str, params: dict, timeout: int = 25):
+        if not self.apis:
+            return None
+        for api in self._ordered():
+            p = dict(params)
+            p["api_key"] = api.key
+            url = f"{api.url}{endpoint}"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        url, params=p,
+                        timeout=aiohttp.ClientTimeout(total=timeout),
+                    ) as resp:
+                        if resp.status == 200:
+                            try:
+                                data = await resp.json()
+                            except Exception:
+                                data = await resp.text()
+                            api.mark_success()
+                            self._advance()
+                            return data
+                        api.mark_failure()
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                api.mark_failure()
+            except Exception:
+                api.mark_failure()
+        return None
+
+    async def download_to_file(self, endpoint, params, file_path, timeout=300):
+        if not self.apis:
+            return False, None, {}
+
+        for api in self._ordered():
+            p = dict(params)
+            p["api_key"] = api.key
+            url = f"{api.url}{endpoint}"
+
+            headers = {}
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        url, params=p,
+                        timeout=aiohttp.ClientTimeout(total=timeout),
+                    ) as resp:
+                        if resp.status != 200:
+                            api.mark_failure()
+                            continue
+                        try:
+                            cd = resp.content_disposition
+                            if cd and cd.filename:
+                                headers["filename"] = cd.filename
+                        except Exception:
+                            pass
+
+                        written = 0
+                        ok = True
+                        try:
+                            with open(file_path, "wb") as f:
+                                async for chunk in resp.content.iter_chunked(131072):
+                                    f.write(chunk)
+                                    written += len(chunk)
+                        except Exception:
+                            ok = False
+
+                        if not ok or written == 0 or not os.path.isfile(file_path) or os.path.getsize(file_path) == 0:
+                            api.mark_failure()
+                            if os.path.isfile(file_path):
+                                try: os.remove(file_path)
+                                except Exception: pass
+                            continue
+
+                        api.mark_success()
+                        self._advance()
+                        return True, api, headers
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                api.mark_failure()
+                if os.path.isfile(file_path):
+                    try: os.remove(file_path)
+                    except Exception: pass
+                continue
+            except Exception:
+                api.mark_failure()
+                if os.path.isfile(file_path):
+                    try: os.remove(file_path)
+                    except Exception: pass
+                continue
+
+        return False, None, {}
+
+
+API_POOL = ShrutiAPIPool()
+
+
+# =========================================================
+# Download helpers
+# =========================================================
 
 async def _download_media(link: str, kind: str, timeout: int) -> str:
     video_id = link.split("v=")[-1].split("&")[0] if "v=" in link else link
@@ -76,32 +261,28 @@ async def _download_media(link: str, kind: str, timeout: int) -> str:
     if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
         return file_path
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{API_URL}/download",
-                params={"url": video_id, "type": kind, "api_key": API_KEY},
-                timeout=aiohttp.ClientTimeout(total=timeout)
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                if external:
-                    found = _find_external(external, video_id, extensions, resp)
-                    if found:
-                        return found
-                with open(file_path, "wb") as f:
-                    async for chunk in resp.content.iter_chunked(131072):
-                        f.write(chunk)
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            return file_path
+    target = file_path
+    if external:
+        os.makedirs(external, exist_ok=True)
+        ext = "mp3" if is_audio else "mp4"
+        target = os.path.join(external, f"{video_id}.{ext}")
+
+    ok, api_used, headers = await API_POOL.download_to_file(
+        "/download",
+        {"url": video_id, "type": kind},
+        target,
+        timeout=timeout,
+    )
+    if not ok:
         return None
-    except Exception:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
-        return None
+
+    if external:
+        found = _find_external(external, video_id, extensions)
+        if found:
+            return found
+    if os.path.isfile(target) and os.path.getsize(target) > 0:
+        return target
+    return None
 
 
 async def download_song(link: str) -> str:
@@ -112,48 +293,37 @@ async def download_video(link: str) -> str:
     return await _download_media(link, "video", 600)
 
 
+# =========================================================
+# Autoplay via API pool
+# =========================================================
+
 AUTOPLAY_REQUEST_TIMEOUT = 20
-AUTOPLAY_MAX_RETRIES = 3
-AUTOPLAY_RETRY_DELAY = 1
-AUTOPLAY_RETRYABLE_STATUS = (408, 425, 429, 500, 502, 503, 504)
+AUTOPLAY_MAX_RETRIES = 2
 
 
-async def get_autoplay(
-    video_id: str,
-    timeout: int = AUTOPLAY_REQUEST_TIMEOUT,
-    retries: int = AUTOPLAY_MAX_RETRIES,
-) -> list:
+async def get_autoplay(video_id: str, timeout: int = AUTOPLAY_REQUEST_TIMEOUT, retries: int = AUTOPLAY_MAX_RETRIES) -> list:
     video_id = video_id.split("v=")[-1].split("&")[0] if "v=" in video_id else video_id
     if not video_id or len(video_id) < 3:
         return []
 
-    attempt = 0
-    while attempt < retries:
-        attempt += 1
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{API_URL}/autoplay",
-                    params={"video_id": video_id, "api_key": API_KEY},
-                    timeout=aiohttp.ClientTimeout(total=timeout),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("tracks", [])
-                    if resp.status in AUTOPLAY_RETRYABLE_STATUS and attempt < retries:
-                        await asyncio.sleep(AUTOPLAY_RETRY_DELAY)
-                        continue
-                    return []
-        except (asyncio.TimeoutError, aiohttp.ClientError):
-            if attempt < retries:
-                await asyncio.sleep(AUTOPLAY_RETRY_DELAY)
-                continue
-            return []
-        except Exception:
-            return []
-
+    for attempt in range(retries):
+        data = await API_POOL.get_json(
+            "/autoplay",
+            {"video_id": video_id},
+            timeout=timeout,
+        )
+        if isinstance(data, dict):
+            tracks = data.get("tracks") or []
+            if tracks:
+                return tracks
+        if attempt < retries - 1:
+            await asyncio.sleep(1)
     return []
 
+
+# =========================================================
+# YouTubeAPI (same as before, downloads go through pool now)
+# =========================================================
 
 class YouTubeAPI:
     def __init__(self):
@@ -198,38 +368,30 @@ class YouTubeAPI:
             duration_sec = int(time_to_seconds(duration_min)) if duration_min else 0
         return title, duration_min, duration_sec, thumbnail, vidid
 
-    async def title(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def title(self, link, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             return result["title"]
 
-    async def duration(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def duration(self, link, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             return result["duration"]
 
-    async def thumbnail(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def thumbnail(self, link, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             return result["thumbnails"][0]["url"].split("?")[0]
 
-    async def video(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def video(self, link, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         try:
             downloaded_file = await download_video(link)
             if downloaded_file:
@@ -238,31 +400,19 @@ class YouTubeAPI:
         except Exception as e:
             return 0, f"Video download error: {e}"
 
-    async def playlist(self, link, limit, user_id, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.listbase + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def playlist(self, link, limit, user_id, videoid=None):
+        if videoid: link = self.listbase + link
+        if "&" in link: link = link.split("&")[0]
         try:
             plist = await Playlist.get(link)
         except Exception:
             return []
         videos = plist.get("videos") or []
-        ids = []
-        for data in videos[:limit]:
-            if not data:
-                continue
-            vid = data.get("id")
-            if not vid:
-                continue
-            ids.append(vid)
-        return ids
+        return [d.get("id") for d in videos[:limit] if d and d.get("id")]
 
-    async def track(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def track(self, link, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             title = result["title"]
@@ -270,20 +420,14 @@ class YouTubeAPI:
             vidid = result["id"]
             yturl = result["link"]
             thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        track_details = {
-            "title": title,
-            "link": yturl,
-            "vidid": vidid,
-            "duration_min": duration_min,
-            "thumb": thumbnail,
-        }
-        return track_details, vidid
+        return {
+            "title": title, "link": yturl, "vidid": vidid,
+            "duration_min": duration_min, "thumb": thumbnail,
+        }, vidid
 
-    async def formats(self, link: str, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def formats(self, link, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         ytdl_opts = {"quiet": True}
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
@@ -292,25 +436,21 @@ class YouTubeAPI:
             for format in r["formats"]:
                 try:
                     if "dash" not in str(format["format"]).lower():
-                        formats_available.append(
-                            {
-                                "format": format["format"],
-                                "filesize": format.get("filesize"),
-                                "format_id": format["format_id"],
-                                "ext": format["ext"],
-                                "format_note": format["format_note"],
-                                "yturl": link,
-                            }
-                        )
+                        formats_available.append({
+                            "format": format["format"],
+                            "filesize": format.get("filesize"),
+                            "format_id": format["format_id"],
+                            "ext": format["ext"],
+                            "format_note": format["format_note"],
+                            "yturl": link,
+                        })
                 except Exception:
                     continue
         return formats_available, link
 
-    async def slider(self, link: str, query_type: int, videoid: Union[bool, str] = None):
-        if videoid:
-            link = self.base + link
-        if "&" in link:
-            link = link.split("&")[0]
+    async def slider(self, link, query_type, videoid=None):
+        if videoid: link = self.base + link
+        if "&" in link: link = link.split("&")[0]
         a = VideosSearch(link, limit=10)
         result = (await a.next()).get("result")
         title = result[query_type]["title"]
@@ -320,15 +460,8 @@ class YouTubeAPI:
         return title, duration_min, thumbnail, vidid
 
     async def download(
-        self,
-        link: str,
-        mystic,
-        video: Union[bool, str] = None,
-        videoid: Union[bool, str] = None,
-        songaudio: Union[bool, str] = None,
-        songvideo: Union[bool, str] = None,
-        format_id: Union[bool, str] = None,
-        title: Union[bool, str] = None,
+        self, link, mystic, video=None, videoid=None,
+        songaudio=None, songvideo=None, format_id=None, title=None,
     ) -> str:
         if videoid:
             link = self.base + link
