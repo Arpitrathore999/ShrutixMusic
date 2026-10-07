@@ -36,7 +36,14 @@ UPSTREAM_BRANCH = getenv("UPSTREAM_BRANCH", "main")
 
 GIT_TOKEN = getenv("GIT_TOKEN")
 
-# Get API Key from @SHRUTIAPIBOT
+# ------------------- Multiple Shruti APIs -------------------
+# Comma-separated URLs and keys (order matters — URL[0] pairs with KEY[0])
+SHRUTI_API_URLS = getenv("SHRUTI_API_URLS", "")
+SHRUTI_API_KEYS = getenv("SHRUTI_API_KEYS", "")
+
+# Legacy single-API fallback (agar upar wale khali hon)
+SHRUTI_API_URL = getenv("SHRUTI_API_URL", "https://api.shrutibots.site")
+SHRUTI_API_KEY = getenv("SHRUTI_API_KEY", "")
 
 SUPPORT_CHANNEL = getenv(
     "SUPPORT_CHANNEL",
@@ -54,7 +61,7 @@ AUTO_LEAVING_ASSISTANT = getenv(
 ).lower() == "true"
 
 # Get from developer.spotify.com/dashboard
-SPOTIFY_CLIENT_ID = getenv("0")
+SPOTIFY_CLIENT_ID = getenv("SPOTIFY_CLIENT_ID")
 SPOTIFY_CLIENT_SECRET = getenv("SPOTIFY_CLIENT_SECRET")
 
 PLAYLIST_FETCH_LIMIT = int(
